@@ -214,6 +214,38 @@ def test_gum_perfect_correlation_uncertainty_is_abs_sum():
     assert g.coverage_low == g.coverage_high == 8.0
 
 
+def test_gum_small_scale_variance_not_clamped():
+    # 小量级不确定度（1e-9）：舍入误差判定必须随协方差项尺度缩放，
+    # 真实正方差（~4e-18）不得被固定绝对阈值误钳为 0
+    from app.engine import build_correlation_matrix, run_gum
+    expr, ctx = _linear_sum_ctx()
+    x = ctx.nominal_to_base({"a": 3.0, "b": 5.0})
+
+    # r = +1、ua = ub = 1e-9：uc = ua + ub = 2e-9，覆盖区间与逐项方差贡献不得归零
+    corr = build_correlation_matrix(("a", "b"), [("a", "b", 1.0)], set())
+    g = run_gum(expr, ("a", "b"), x, np.array([1e-9, 1e-9]), corr, ctx)
+    assert abs(g.uc - 2e-9) / 2e-9 < 1e-9, g.uc
+    assert g.coverage_low < 8.0 < g.coverage_high
+    indiv = [c for c in g.contributions if c["kind"] == "individual"]
+    covar = [c for c in g.contributions if c["kind"] == "covariance"]
+    assert len(indiv) == 2 and len(covar) == 1
+    assert all(c["variance_contribution"] > 0.0 for c in indiv)
+    assert all(abs(c["fraction"] - 0.25) < 1e-6 for c in indiv)
+    assert covar[0]["variance_contribution"] > 0.0
+    assert abs(covar[0]["fraction"] - 0.5) < 1e-6
+
+    # r = -1、ua = 1e-9、ub = 2e-9：uc = |ub - ua| = 1e-9（不得归零）
+    corr = build_correlation_matrix(("a", "b"), [("a", "b", -1.0)], set())
+    g = run_gum(expr, ("a", "b"), x, np.array([1e-9, 2e-9]), corr, ctx)
+    assert abs(g.uc - 1e-9) / 1e-9 < 1e-9, g.uc
+    assert g.coverage_low < 8.0 < g.coverage_high
+
+    # r = -1、ua = ub = 1e-9：完全抵消，理论方差恰为 0，仍钳为 0
+    g = run_gum(expr, ("a", "b"), x, np.array([1e-9, 1e-9]), corr, ctx)
+    assert g.uc == 0.0
+    assert g.coverage_low == g.coverage_high == 8.0
+
+
 def test_monte_carlo_perfect_correlation_directions():
     # 固定种子下：r=+1 标准化输入同向（ua+ub），r=-1 反向（|ua-ub|）
     from app.engine import (

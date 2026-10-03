@@ -458,3 +458,100 @@ def test_below_threshold_still_rejected(client):
     assert r.status_code == 422
     assert "半正定" in r.json()["message"]
     assert client.get("/api/v1/models/below-threshold-v1").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 小量级不确定度（1e-9）：真实正方差不得被舍入误差判定误钳为零
+# ---------------------------------------------------------------------------
+
+def _tiny_model(version: str, r: float, ua: float, ub: float) -> dict:
+    return {
+        "version": version,
+        "name": "小量级线性和 y=a+b",
+        "expression": "a + b",
+        "inputs": [
+            {"name": "a", "value": 3.0, "unit": "dimensionless",
+             "standard_uncertainty": ua, "distribution": "normal"},
+            {"name": "b", "value": 5.0, "unit": "dimensionless",
+             "standard_uncertainty": ub, "distribution": "normal"},
+        ],
+        "output_unit": "dimensionless",
+        "correlations": [{"i": "a", "j": "b", "r": r}],
+    }
+
+
+def _tiny_payload(version: str, r: float, ua: float, ub: float, key: str,
+                  n: int = 10000, seed: int = 20261003) -> dict:
+    m = _tiny_model(version, r, ua, ub)
+    return {
+        "model_version": version,
+        "inputs": m["inputs"],
+        "correlations": m["correlations"],
+        "n": n,
+        "seed": seed,
+        "idempotency_key": key,
+    }
+
+
+def test_tiny_scale_perfect_positive_correlation(client):
+    # r=+1、ua=ub=1e-9：GUM uc = 2e-9，覆盖区间与逐项方差贡献不得归零
+    m = _tiny_model("tiny-r1-v1", 1.0, 1e-9, 1e-9)
+    assert client.post("/api/v1/models", json=m).status_code == 201
+    p = _tiny_payload("tiny-r1-v1", 1.0, 1e-9, 1e-9, "key-0014-tiny-r1")
+    r = client.post("/api/v1/evaluations", json=p)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    gum = body["result"]["combined"]["gum"]
+    assert gum["value"] == 8.0
+    assert gum["standard_uncertainty"] == 2e-9
+    assert gum["coverage_interval"]["low"] < 8.0 < gum["coverage_interval"]["high"]
+
+    contribs = body["result"]["contributions"]["gum"]
+    indiv = [c for c in contribs if c["kind"] == "individual"]
+    covar = [c for c in contribs if c["kind"] == "covariance"]
+    assert len(indiv) == 2 and len(covar) == 1
+    assert all(c["variance_contribution"] > 0.0 for c in indiv)
+    assert all(abs(c["fraction"] - 0.25) < 1e-6 for c in indiv)
+    assert covar[0]["variance_contribution"] > 0.0
+    assert abs(covar[0]["fraction"] - 0.5) < 1e-6
+
+    mc = body["result"]["combined"]["monte_carlo"]
+    assert abs(mc["standard_uncertainty"] - 2e-9) < 1e-10
+    assert body["result"]["convergence"]["converged"] is True
+
+    # 幂等重放与结果查询保持可用
+    r2 = client.post("/api/v1/evaluations", json=p)
+    assert r2.status_code == 200
+    assert r2.json()["cached"] is True
+    assert r2.json()["id"] == body["id"]
+    assert client.get(f"/api/v1/evaluations/{body['id']}").status_code == 200
+    assert client.get("/api/v1/idempotency/key-0014-tiny-r1").status_code == 200
+    listing = client.get("/api/v1/evaluations?model_version=tiny-r1-v1")
+    assert listing.json()["count"] >= 1
+
+
+def test_tiny_scale_perfect_negative_correlation(client):
+    # r=-1、ua=1e-9, ub=2e-9：GUM uc = |ub-ua| = 1e-9（不得归零）
+    m = _tiny_model("tiny-rm1-diff-v1", -1.0, 1e-9, 2e-9)
+    assert client.post("/api/v1/models", json=m).status_code == 201
+    p = _tiny_payload("tiny-rm1-diff-v1", -1.0, 1e-9, 2e-9, "key-0015-tiny-rm1-diff")
+    r = client.post("/api/v1/evaluations", json=p)
+    assert r.status_code == 201, r.text
+    gum = r.json()["result"]["combined"]["gum"]
+    assert gum["standard_uncertainty"] == 1e-9
+    assert gum["coverage_interval"]["low"] < 8.0 < gum["coverage_interval"]["high"]
+    mc = r.json()["result"]["combined"]["monte_carlo"]
+    assert abs(mc["standard_uncertainty"] - 1e-9) < 1e-10
+
+
+def test_tiny_scale_cancellation_still_zero(client):
+    # r=-1、ua=ub=1e-9：完全抵消，GUM uc 恰为 0，覆盖区间退化为点
+    m = _tiny_model("tiny-rm1-eq-v1", -1.0, 1e-9, 1e-9)
+    assert client.post("/api/v1/models", json=m).status_code == 201
+    p = _tiny_payload("tiny-rm1-eq-v1", -1.0, 1e-9, 1e-9, "key-0016-tiny-rm1-eq", n=5000)
+    r = client.post("/api/v1/evaluations", json=p)
+    assert r.status_code == 201, r.text
+    gum = r.json()["result"]["combined"]["gum"]
+    assert gum["standard_uncertainty"] == 0.0
+    assert gum["coverage_interval"]["low"] == gum["coverage_interval"]["high"] == 8.0
+    assert r.json()["result"]["convergence"]["converged"] is True

@@ -6,6 +6,7 @@ import ast
 import copy
 import hashlib
 import json
+import math
 import uuid
 from typing import Any
 
@@ -407,5 +408,14 @@ def s_unit(name: str, record: dict[str, Any]) -> str:
 
 
 def _f(x: Any) -> float:
-    """统一转 float（剔除 numpy 标量，保证 JSON 可序列化）。"""
-    return round(float(x), 15)
+    """统一转 float（剔除 numpy 标量，保证 JSON 可序列化）。
+
+    常规量级按 15 位小数舍入以消除二进制浮点尾噪；若该舍入会把非零的
+    小量级值抹成 0（如 1e-18 量级的方差贡献），改用 15 位有效数字舍入，
+    保留小量级结果的真实响应精度。
+    """
+    v = float(x)
+    r = round(v, 15)
+    if r == 0.0 and v != 0.0:
+        return round(v, 14 - int(math.floor(math.log10(abs(v)))))
+    return r

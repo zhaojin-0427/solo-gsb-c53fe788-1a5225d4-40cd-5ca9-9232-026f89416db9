@@ -315,12 +315,16 @@ def run_gum(
     grad_base = numerical_gradient(compiled, x_base, names)
     cov = (std_base[:, None] * corr * std_base[None, :])
     var_y = float(grad_base @ cov @ grad_base)
-    # 机器精度尺度：各不确定度项单独贡献之和（与相关结构无关，非负）
-    diag_scale = float(grad_base @ np.diag(np.diag(cov)) @ grad_base)
-    var_floor = _EPS * max(1.0, abs(diag_scale))
+    # 舍入误差尺度：二次型中全部协方差项的绝对值之和
+    # term_scale = Σᵢⱼ |gᵢ·covᵢⱼ·gⱼ|（非负，随不确定度量级缩放）。
+    # 浮点累加残差以该尺度的机器精度倍数为界，因此判定阈值必须与协方差项
+    # 尺度成正比，而不能用固定绝对阈值——否则小量级测量（如标准不确定度
+    # 1e-9、真实方差 ~4e-18）会被误钳为 0。
+    term_scale = float(np.abs(grad_base) @ np.abs(cov) @ np.abs(grad_base))
+    var_floor = _EPS * term_scale
     # 完全相关抵消（r = -1、梯度与标准差逐项匹配）时，理论方差恰为 0；
-    # 矩阵乘法次序会残留 ±1e-12 量级的浮点噪声（可正可负），统一钳为 0。
-    # 仅钳机器精度级别残差，真实小方差（uc 远大于 0）不受影响。
+    # 矩阵乘法次序会残留 ±_EPS·term_scale 量级的浮点噪声（可正可负），统一钳为 0。
+    # 仅钳舍入误差级别残差，真实正方差（大于该尺度）保留其响应精度。
     if -var_floor <= var_y <= var_floor:
         var_y = 0.0
     if var_y < 0:

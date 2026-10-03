@@ -28,6 +28,7 @@
   - [5. 等价单位写法](#5-等价单位写法)
   - [6. 拒绝场景示例](#6-拒绝场景示例)
   - [7. 完全相关（r = ±1，奇异半正定矩阵）](#7-完全相关r--1奇异半正定矩阵)
+  - [8. 小量级不确定度（1e-9）的完全相关](#8-小量级不确定度1e-9的完全相关)
 - [模型表达式白名单](#模型表达式白名单)
 - [分布与相关系数](#分布与相关系数)
 - [结果字段说明](#结果字段说明)
@@ -387,6 +388,108 @@ curl -sS "http://localhost:8000/api/v1/evaluations?model_version=sum-perfect-r1"
 
 抽样实现上，正定矩阵仍走 Cholesky 分解（固定种子流与历史版本逐位一致）；奇异半正定矩阵改用特征分解的对称平方根 F = Q·√Λ·Qᵀ（F Fᵀ = 相关矩阵），并对矩阵中精确存储为 ±1 的边做符号对齐，因此 r=±1 时标准化正态行严格相同/相反。正态边际直接使用该标准正态样本（不经 CDF/分位往返），保证完全反相时严格抵消；均匀/三角边际仍经 Gaussian copula 变换保持精确边际分布。
 
+### 8. 小量级不确定度（1e-9）的完全相关
+
+GUM 合成方差 `var(y) = g·Σ·gᵀ` 的“是否为零”判定采用**与协方差项尺度成正比**的舍入误差阈值 `ε·Σᵢⱼ|gᵢ·Σᵢⱼ·gⱼ|`（ε 为机器精度），而不是固定绝对阈值——否则小量级测量（如标准不确定度 1e-9、真实方差 ~4e-18）会被误钳为 0。只有完全抵消（理论方差恰为 0）时残留的舍入噪声才钳为 0；真实正方差连同 95% 覆盖区间、逐项方差贡献一起保留全部响应精度。
+
+以 `y = a + b`（a = 3.0(1e-9)，b = 5.0(1e-9)，均无量纲、正态）为例，GUM 合成标准不确定度仍为 `u(y) = |ua + r·ub|`：r = +1 时 2e-9，r = −1 且 ua ≠ ub 时 |ua − ub|，r = −1 且 ua = ub 时恰为 0。
+
+**登记（r = +1）：**
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/models \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "version": "sum-tiny-r1",
+    "name": "小量级线性和 y=a+b（完全正相关）",
+    "expression": "a + b",
+    "inputs": [
+      {"name": "a", "value": 3.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"},
+      {"name": "b", "value": 5.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"}
+    ],
+    "output_unit": "dimensionless",
+    "correlations": [{"i": "a", "j": "b", "r": 1.0}]
+  }'
+# HTTP 201
+```
+
+**计算（N=20000，seed=20261003）：**
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/evaluations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model_version": "sum-tiny-r1",
+    "inputs": [
+      {"name": "a", "value": 3.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"},
+      {"name": "b", "value": 5.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"}
+    ],
+    "correlations": [{"i": "a", "j": "b", "r": 1.0}],
+    "n": 20000, "seed": 20261003, "idempotency_key": "doc-tiny-r1-0001"
+  }'
+```
+
+返回 `201`（以下为该种子下的**实际响应**节选，可复现）。GUM 标准不确定度为 **2e-9**（= 1e-9 + 1e-9），覆盖区间与逐项方差贡献均不为零：
+
+```json
+{
+  "id": "9cb84b6433ca4db283932ea24fc6cb65",
+  "cached": false,
+  "result": {
+    "combined": {
+      "gum": {
+        "value": 8.0,
+        "standard_uncertainty": 2e-09,
+        "coverage_interval": {"low": 7.999999996080072, "high": 8.000000003919927},
+        "coverage_factor": 1.959963984540054,
+        "unit": "dimensionless"
+      },
+      "monte_carlo": {
+        "mean": 7.999999999989904,
+        "standard_uncertainty": 2.006032e-09,
+        "median": 7.999999999970274,
+        "coverage_interval": {"low": 7.999999996075437, "high": 8.000000003927587},
+        "samples_range": {"min": 7.999999991104339, "max": 8.00000000732518},
+        "unit": "dimensionless"
+      }
+    },
+    "contributions": {
+      "gum": [
+        {"source": "a",   "kind": "individual", "variance_contribution": 1.00000000004711e-18, "fraction": 0.250000000003667},
+        {"source": "b",   "kind": "individual", "variance_contribution": 1.00000000001777e-18, "fraction": 0.249999999996333},
+        {"source": "a~b", "kind": "covariance", "variance_contribution": 2.00000000006488e-18, "fraction": 0.5}
+      ],
+      "monte_carlo": [
+        {"source": "a", "pearson_r": 0.99999999999995,  "r_squared": 0.999999999999901},
+        {"source": "b", "pearson_r": 0.999999999999902, "r_squared": 0.999999999999804}
+      ]
+    },
+    "convergence": {"n": 20000, "seed": 20261003, "converged": true}
+  }
+}
+```
+
+**r = −1、ua = 1e-9、ub = 2e-9**（版本 `sum-tiny-rm1-diff`，幂等键 `doc-tiny-rm1-diff-0001`，其余同上）：GUM `standard_uncertainty = 1e-09`（= |1e-9 − 2e-9|），覆盖区间 `[7.999999998040036, 8.000000001959965]`；方差贡献为 `1.0e-18 + 4.0e-18 − 4.0e-18`（协方差项为负），合计 1e-18。
+
+**r = −1、ua = ub = 1e-9**（版本 `sum-tiny-rm1-cancel`，N=5000，seed=77，幂等键 `doc-tiny-cancel-0001`）：完全抵消，GUM 与 MC 的 `standard_uncertainty` 均为 `0.0`，覆盖区间退化为 `[8.0, 8.0]`，MC `samples_range` 为 `{min: 8.0, max: 8.0}`，收敛判据照常通过。
+
+幂等重放与查询接口对小量级结果完全一致地可用：
+
+```bash
+# 原样重发同一请求 -> HTTP 200，cached=true，id 相同（9cb84b6433ca4db283932ea24fc6cb65）
+curl -sS http://localhost:8000/api/v1/evaluations/9cb84b6433ca4db283932ea24fc6cb65   # 200
+curl -sS http://localhost:8000/api/v1/idempotency/doc-tiny-r1-0001                    # 200
+curl -sS "http://localhost:8000/api/v1/evaluations?model_version=sum-tiny-r1"         # 200
+```
+
+**方差零判定规则**（与实现一致）：
+
+| 合成方差 var(y) | 处置 |
+| --- | --- |
+| 理论恰为 0（完全抵消）时的舍入残差：abs(var) ≤ ε·Σᵢⱼ\|gᵢ·Σᵢⱼ·gⱼ\| | 钳为 0（uc = 0，覆盖区间退化为点） |
+| 大于该尺度的真实正方差（任意小，如 4e-18） | 保留，uc、覆盖区间、逐项方差贡献按实际值输出 |
+| 小于 −ε·Σᵢⱼ\|gᵢ·Σᵢⱼ·gⱼ\|（数值异常） | 422 `PropagationError`，不保存结果 |
+
 ## 模型表达式白名单
 
 表达式在服务端经 Python AST 解析后**逐节点白名单校验**，不经过任何 `eval`：
@@ -442,7 +545,7 @@ pip install -r requirements.txt pytest httpx
 python -m pytest -q
 ```
 
-测试覆盖：表达式注入拒绝、单位换算与量纲校验、PSD 拒绝（< -1e-8）/舍入修复（[-1e-8,0)，保单位对角）/奇异接受（r=±1 零特征值）、r=±1 的 GUM 解析解 |ua+r·ub| 与 MC 同/反向传播、完全抵消退化为确定值、MC 与线性高斯解析解对比、固定种子可复现、幂等与冲突、不收敛/NaN 不落库、查询接口等（40 个用例）。
+测试覆盖：表达式注入拒绝、单位换算与量纲校验、PSD 拒绝（< -1e-8）/舍入修复（[-1e-8,0)，保单位对角）/奇异接受（r=±1 零特征值）、r=±1 的 GUM 解析解 |ua+r·ub| 与 MC 同/反向传播、完全抵消退化为确定值、小量级（1e-9）真实正方差保留（uc=2e-9/1e-9，覆盖区间与逐项方差贡献不归零）、MC 与线性高斯解析解对比、固定种子可复现、幂等与冲突、不收敛/NaN 不落库、查询接口等（44 个用例）。
 
 ## 项目结构
 
