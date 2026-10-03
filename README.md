@@ -28,6 +28,7 @@
   - [5. 等价单位写法](#5-等价单位写法)
   - [6. 拒绝场景示例](#6-拒绝场景示例)
   - [7. 完全相关（r = ±1，奇异半正定矩阵）](#7-完全相关r--1奇异半正定矩阵)
+  - [8. 小量级标准不确定度（1e-9，真实方差不得归零）](#8-小量级标准不确定度1e-9真实方差不得归零)
 - [模型表达式白名单](#模型表达式白名单)
 - [分布与相关系数](#分布与相关系数)
 - [结果字段说明](#结果字段说明)
@@ -156,24 +157,24 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
 
 ```json
 {
-  "id": "bca8fe4416114d3a9f8474bafdbdf110",
+  "id": "2fe78121179b4241b4b11cc4acd1e52e",
   "request_hash": "dc83ec665ac4cd5dd944d1c4121aab6644d6f5cd8d06c4fc7ec6ebfdd8f3e037",
   "idempotency_key": "demo-power-0001",
   "result": {
     "combined": {
       "gum": {
         "value": 20.0,
-        "standard_uncertainty": 0.34641,
-        "coverage_interval": {"low": 19.3210, "high": 20.6790},
-        "coverage_factor": 1.95996,
+        "standard_uncertainty": 0.346410161511773,
+        "coverage_interval": {"low": 19.32104855955822, "high": 20.67895144044178},
+        "coverage_factor": 1.959963984540054,
         "unit": "W"
       },
       "monte_carlo": {
-        "mean": 20.0036,
-        "standard_uncertainty": 0.34964,
-        "median": 20.0007,
-        "coverage_interval": {"low": 19.3200, "high": 20.6880},
-        "samples_range": {"min": 18.7643, "max": 21.3948},
+        "mean": 20.003607269122142,
+        "standard_uncertainty": 0.349635117087063,
+        "median": 20.000662952454014,
+        "coverage_interval": {"low": 19.320035649804154, "high": 20.687972138617937},
+        "samples_range": {"min": 18.764296221280656, "max": 21.394827454449107},
         "unit": "W"
       }
     },
@@ -183,20 +184,20 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
     },
     "contributions": {
       "gum": [
-        {"source": "U",     "kind": "individual",  "variance_contribution": 0.04, "fraction": 0.3333},
-        {"source": "I",     "kind": "individual",  "variance_contribution": 0.04, "fraction": 0.3333},
-        {"source": "U~I",   "kind": "covariance",  "variance_contribution": 0.04, "fraction": 0.3333}
+        {"source": "U",     "kind": "individual",  "variance_contribution": 0.039999999999537, "fraction": 0.333333333333333},
+        {"source": "I",     "kind": "individual",  "variance_contribution": 0.039999999999537, "fraction": 0.333333333333333},
+        {"source": "U~I",   "kind": "covariance",  "variance_contribution": 0.039999999999537, "fraction": 0.333333333333333}
       ],
       "monte_carlo": [
-        {"source": "U", "pearson_r": 0.867, "r_squared": 0.752},
-        {"source": "I", "pearson_r": 0.868, "r_squared": 0.753}
+        {"source": "U", "pearson_r": 0.866970679085141, "r_squared": 0.751638158393351},
+        {"source": "I", "pearson_r": 0.868017294162284, "r_squared": 0.753454022964814}
       ]
     },
     "convergence": {
-      "n": 20000, "seed": 20260929, "kurtosis_excess": 0.0006,
-      "se_mean": 0.00247, "se_std": 0.00175,
-      "se_quantile_low": 0.00343, "se_quantile_high": 0.00345,
-      "rel_se_mean": 0.000124, "rel_se_std": 0.0050, "rel_se_quantile": 0.0050,
+      "n": 20000, "seed": 20260929, "kurtosis_excess": 0.00061862452913,
+      "se_mean": 0.002472293622332, "se_std": 0.001748445930606,
+      "se_quantile_low": 0.00631453621075, "se_quantile_high": 0.006789317774467,
+      "rel_se_mean": 0.000123592389566, "rel_se_std": 0.005000773220874, "rel_se_quantile": 0.004963182011728,
       "tolerance": 0.05, "converged": true
     }
   }
@@ -210,7 +211,7 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
 原样再发一次同样的请求，返回 `200` 且：
 
 ```json
-{ "cached": true, "id": "bca8fe4416114d3a9f8474bafdbdf110", "...": "结果完全相同" }
+{ "cached": true, "id": "2fe78121179b4241b4b11cc4acd1e52e", "...": "结果完全相同" }
 ```
 
 **相同幂等键但内容不同**（例如改 N）→ `409 Conflict`。
@@ -218,7 +219,7 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
 ### 4. 查询结果
 
 ```bash
-curl -sS http://localhost:8000/api/v1/evaluations/bca8fe4416114d3a9f8474bafdbdf110
+curl -sS http://localhost:8000/api/v1/evaluations/2fe78121179b4241b4b11cc4acd1e52e
 curl -sS "http://localhost:8000/api/v1/evaluations?model_version=power-dc-v1"
 curl -sS http://localhost:8000/api/v1/idempotency/demo-power-0001
 ```
@@ -303,7 +304,7 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
 
 ```json
 {
-  "id": "49f2e458a02e4bcab90ded195c3a7225",
+  "id": "2cdf1a18514849f3afedf2a32d820d85",
   "cached": false,
   "result": {
     "combined": {
@@ -340,7 +341,7 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
 
 ```json
 {
-  "id": "246dcdef6e2d494b83e3d415d21a047c",
+  "id": "fd5034c82af94f2f8ef82302b52b7bc1",
   "result": {
     "combined": {
       "gum": {
@@ -372,7 +373,7 @@ curl -sS -X POST http://localhost:8000/api/v1/evaluations \
 查询接口对这些结果完全一致地可用：
 
 ```bash
-curl -sS http://localhost:8000/api/v1/evaluations/49f2e458a02e4bcab90ded195c3a7225   # 200
+curl -sS http://localhost:8000/api/v1/evaluations/2cdf1a18514849f3afedf2a32d820d85   # 200
 curl -sS http://localhost:8000/api/v1/idempotency/doc-r1-0002                        # 200
 curl -sS "http://localhost:8000/api/v1/evaluations?model_version=sum-perfect-r1"     # 200
 ```
@@ -386,6 +387,159 @@ curl -sS "http://localhost:8000/api/v1/evaluations?model_version=sum-perfect-r1"
 | < −1e-8（明显非半正定） | 422 拒绝，不登记、不保存 |
 
 抽样实现上，正定矩阵仍走 Cholesky 分解（固定种子流与历史版本逐位一致）；奇异半正定矩阵改用特征分解的对称平方根 F = Q·√Λ·Qᵀ（F Fᵀ = 相关矩阵），并对矩阵中精确存储为 ±1 的边做符号对齐，因此 r=±1 时标准化正态行严格相同/相反。正态边际直接使用该标准正态样本（不经 CDF/分位往返），保证完全反相时严格抵消；均匀/三角边际仍经 Gaussian copula 变换保持精确边际分布。
+
+### 8. 小量级标准不确定度（1e-9，真实方差不得归零）
+
+判定 GUM 合成方差是否“舍入噪声”的阈值**必须与协方差项同尺度**：阈值取
+
+```
+ε · n · Σᵢⱼ |gᵢ gⱼ Cov(i,j)|
+```
+
+（ε 为机器精度，n 为输入个数），随不确定度量级一起收缩。绝不能用与输入尺度无关的固定绝对阈值（如 `ε·max(1, …)`）——当两个标准不确定度均为 **1e-9** 时，真实合成方差只有 ~1e-18 量级，固定阈值（~2.2e-16）会把它误判为舍入噪声而**钳为零**，导致标准不确定度、95% 覆盖区间与逐项方差贡献全部错误归零。响应序列化同样按尺度处理：常规数值保留历史的 15 位小数舍入，小于 1e-15 的小值改用 15 位有效数字，避免 1e-18 被舍成 0.0。
+
+以线性模型 `y = a + b`（a = 3.0、b = 5.0，均无量纲、正态）为例：
+
+| ua | ub | r | 理论 u(y) = |ua + r·ub| | 处置 |
+| --- | --- | --- | --- | --- |
+| 1e-9 | 1e-9 | +1 | **2e-9** | 真实正方差，完整保留 |
+| 1e-9 | 2e-9 | −1 | **1e-9** | 真实正方差，完整保留 |
+| 1e-9 | 1e-9 | −1 | **0** | 理论完全抵消，钳为零 |
+
+**登记（ua = ub = 1e-9，r = +1）：**
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/models \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "version": "sum-tiny-r1",
+    "name": "线性和 y=a+b（小量级完全正相关）",
+    "expression": "a + b",
+    "inputs": [
+      {"name": "a", "value": 3.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"},
+      {"name": "b", "value": 5.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"}
+    ],
+    "output_unit": "dimensionless",
+    "correlations": [{"i": "a", "j": "b", "r": 1.0}]
+  }'
+# HTTP 201
+```
+
+**计算（N=20000，seed=20261003）：**
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/evaluations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model_version": "sum-tiny-r1",
+    "inputs": [
+      {"name": "a", "value": 3.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"},
+      {"name": "b", "value": 5.0, "unit": "dimensionless", "standard_uncertainty": 1e-9, "distribution": "normal"}
+    ],
+    "correlations": [{"i": "a", "j": "b", "r": 1.0}],
+    "n": 20000, "seed": 20261003, "idempotency_key": "doc-tiny-r1-0001"
+  }'
+```
+
+返回 `201`（以下为该种子下的**实际响应**节选，可复现）：
+
+```json
+{
+  "id": "a09a0c76418d425a90c8fccd532465dd",
+  "cached": false,
+  "result": {
+    "combined": {
+      "gum": {
+        "value": 8.0,
+        "standard_uncertainty": 2.00000000003244e-09,
+        "coverage_interval": {"low": 7.999999996080072, "high": 8.000000003919927},
+        "coverage_factor": 1.959963984540054,
+        "unit": "dimensionless"
+      },
+      "monte_carlo": {
+        "mean": 7.9999999999899,
+        "standard_uncertainty": 2.0060324203627e-09,
+        "median": 7.99999999997027,
+        "coverage_interval": {"low": 7.999999996075437, "high": 8.000000003927587},
+        "samples_range": {"min": 7.999999991104339, "max": 8.00000000732518},
+        "unit": "dimensionless"
+      }
+    },
+    "contributions": {
+      "gum": [
+        {"source": "a",   "kind": "individual", "variance_contribution": 1.00000000004711e-18, "fraction": 0.250000000003667},
+        {"source": "b",   "kind": "individual", "variance_contribution": 1.00000000001777e-18, "fraction": 0.249999999996333},
+        {"source": "a~b", "kind": "covariance", "variance_contribution": 2.00000000006488e-18, "fraction": 0.5}
+      ],
+      "monte_carlo": [
+        {"source": "a", "pearson_r": 0.99999999999995,  "r_squared": 0.999999999999901},
+        {"source": "b", "pearson_r": 0.999999999999902, "r_squared": 0.999999999999804}
+      ]
+    },
+    "convergence": {"n": 20000, "seed": 20261003, "converged": true}
+  }
+}
+```
+
+> GUM 标准不确定度 2.00000000003e-9 ≈ 精确值 2e-9（偏差来自中心差分梯度 ~2e-11 相对误差）；95% 覆盖区间半宽 3.92e-9 = 1.95996·2e-9；逐项方差贡献 1e-18 / 1e-18 / 2e-18（比例 0.25 / 0.25 / 0.5）均**不为零**。
+
+**r = −1、ua = 1e-9、ub = 2e-9（版本 `sum-tiny-rm1`，幂等键 `doc-tiny-rm1-0001`，同种子）**，返回 `201`：
+
+```json
+{
+  "id": "7204d809af4f4aa484b781d47df9e348",
+  "result": {
+    "combined": {
+      "gum": {
+        "value": 8.0,
+        "standard_uncertainty": 9.99999999994219e-10,
+        "coverage_interval": {"low": 7.999999998040036, "high": 8.000000001959965},
+        "unit": "dimensionless"
+      },
+      "monte_carlo": {
+        "standard_uncertainty": 1.00492046676458e-09,
+        "coverage_interval": {"low": 7.99999999803479, "high": 8.000000001971163},
+        "samples_range": {"min": 7.999999996356614, "max": 8.000000004246077}
+      }
+    },
+    "contributions": {
+      "gum": [
+        {"source": "a",   "kind": "individual", "variance_contribution": 1.00000000004711e-18,  "fraction": 1.000000000058668},
+        {"source": "b",   "kind": "individual", "variance_contribution": 4.00000000007109e-18,  "fraction": 4.000000000117337},
+        {"source": "a~b", "kind": "covariance", "variance_contribution": -4.00000000012976e-18, "fraction": -4.000000000176005}
+      ]
+    }
+  }
+}
+```
+
+**两者同为 1e-9、r = −1（版本 `sum-tiny-cancel`，N=5000，seed=77，幂等键 `doc-tiny-cancel-0001`）** 才是真正的完全抵消：GUM 与 MC 均给出 `standard_uncertainty = 0.0`、覆盖区间 `[8.0, 8.0]`，MC `samples_range` 也是 `{min: 8.0, max: 8.0}`，收敛判据照常通过。
+
+幂等重放、结果查询与非法矩阵拒绝对小量级模型完全一致：
+
+```bash
+# 原样重放上面的 doc-tiny-r1-0001 请求 -> HTTP 200，body 中 cached=true，id 相同
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8000/api/v1/evaluations \
+  -H 'Content-Type: application/json' \
+  -d '{"model_version":"sum-tiny-r1",
+       "inputs":[{"name":"a","value":3.0,"unit":"dimensionless","standard_uncertainty":1e-9,"distribution":"normal"},
+                 {"name":"b","value":5.0,"unit":"dimensionless","standard_uncertainty":1e-9,"distribution":"normal"}],
+       "correlations":[{"i":"a","j":"b","r":1.0}],
+       "n":20000,"seed":20261003,"idempotency_key":"doc-tiny-r1-0001"}'
+# 200
+
+curl -sS http://localhost:8000/api/v1/evaluations/a09a0c76418d425a90c8fccd532465dd   # 200
+curl -sS "http://localhost:8000/api/v1/evaluations?model_version=sum-tiny-r1"        # 200
+curl -sS http://localhost:8000/api/v1/idempotency/doc-tiny-r1-0001                   # 200
+```
+
+小量级不改变非法相关矩阵的处置：给 a、b、c 三个 1e-9 输入指定矛盾的 ±1 组合（最小特征值 −1）仍返回 `422`，且模型不保存（随后 `GET /api/v1/models/...` 为 404）：
+
+```json
+{"error": "CorrelationError",
+ "message": "相关矩阵不是半正定矩阵：最小特征值 -1.000e+00 < -1e-08",
+ "status_code": 422}
+```
 
 ## 模型表达式白名单
 
@@ -442,7 +596,7 @@ pip install -r requirements.txt pytest httpx
 python -m pytest -q
 ```
 
-测试覆盖：表达式注入拒绝、单位换算与量纲校验、PSD 拒绝（< -1e-8）/舍入修复（[-1e-8,0)，保单位对角）/奇异接受（r=±1 零特征值）、r=±1 的 GUM 解析解 |ua+r·ub| 与 MC 同/反向传播、完全抵消退化为确定值、MC 与线性高斯解析解对比、固定种子可复现、幂等与冲突、不收敛/NaN 不落库、查询接口等（40 个用例）。
+测试覆盖：表达式注入拒绝、单位换算与量纲校验、PSD 拒绝（< -1e-8）/舍入修复（[-1e-8,0)，保单位对角）/奇异接受（r=±1 零特征值）、r=±1 的 GUM 解析解 |ua+r·ub| 与 MC 同/反向传播、完全抵消退化为确定值、**小量级（u=1e-9）真实 ~1e-18 方差不被固定绝对阈值钳零（r=+1→2e-9、r=−1 不等→1e-9、r=−1 相等→0）及其 HTTP 登记/计算/幂等/查询/非法矩阵拒绝不落库**、MC 与线性高斯解析解对比、固定种子可复现、幂等与冲突、不收敛/NaN 不落库、查询接口等（46 个用例）。
 
 ## 项目结构
 

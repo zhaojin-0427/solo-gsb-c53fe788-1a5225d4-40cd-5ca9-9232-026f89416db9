@@ -458,3 +458,116 @@ def test_below_threshold_still_rejected(client):
     assert r.status_code == 422
     assert "半正定" in r.json()["message"]
     assert client.get("/api/v1/models/below-threshold-v1").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 小量级标准不确定度（1e-9）：真实 ~1e-18 方差不得被固定绝对阈值钳零
+# ---------------------------------------------------------------------------
+
+def _tiny_model(version: str, ua: float, ub: float, r: float) -> dict:
+    return {
+        "version": version,
+        "name": f"线性和 a+b（小量级，r={r}）",
+        "expression": "a + b",
+        "inputs": [
+            {"name": "a", "value": 3.0, "unit": "dimensionless",
+             "standard_uncertainty": ua, "distribution": "normal"},
+            {"name": "b", "value": 5.0, "unit": "dimensionless",
+             "standard_uncertainty": ub, "distribution": "normal"},
+        ],
+        "output_unit": "dimensionless",
+        "correlations": [{"i": "a", "j": "b", "r": r}],
+    }
+
+
+def _tiny_payload(version: str, ua: float, ub: float, r: float, key: str) -> dict:
+    return {
+        "model_version": version,
+        "inputs": _tiny_model(version, ua, ub, r)["inputs"],
+        "correlations": [{"i": "a", "j": "b", "r": r}],
+        "n": 20000,
+        "seed": 20261003,
+        "idempotency_key": key,
+    }
+
+
+def test_tiny_equal_uncertainty_perfect_positive_not_zeroed(client):
+    # ua=ub=1e-9, r=+1 -> uc = 2e-9：标准不确定度、覆盖区间、逐项贡献均不得归零
+    m = _tiny_model("sum-tiny-r1", 1e-9, 1e-9, 1.0)
+    assert client.post("/api/v1/models", json=m).status_code == 201
+    p = _tiny_payload("sum-tiny-r1", 1e-9, 1e-9, 1.0, "key-0014-tiny-plus")
+    r = client.post("/api/v1/evaluations", json=p)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    gum = body["result"]["combined"]["gum"]
+    assert abs(gum["value"] - 8.0) < 1e-12
+    assert abs(gum["standard_uncertainty"] - 2e-9) < 1e-12
+    ci = gum["coverage_interval"]
+    assert ci["low"] < 8.0 < ci["high"]
+    assert abs((ci["high"] - ci["low"]) / 2 - 1.959963984540054 * 2e-9) < 1e-14
+    contrib = {c["source"]: c for c in body["result"]["contributions"]["gum"]}
+    assert abs(contrib["a"]["variance_contribution"] - 1e-18) < 1e-24
+    assert abs(contrib["b"]["variance_contribution"] - 1e-18) < 1e-24
+    assert abs(contrib["a~b"]["variance_contribution"] - 2e-18) < 1e-24
+    mc = body["result"]["combined"]["monte_carlo"]
+    assert mc["standard_uncertainty"] > 0.0
+    assert mc["coverage_interval"]["low"] < 8.0 < mc["coverage_interval"]["high"]
+    assert body["result"]["convergence"]["converged"] is True
+
+    # 幂等重放
+    r2 = client.post("/api/v1/evaluations", json=p)
+    assert r2.status_code == 200
+    assert r2.json()["cached"] is True
+    assert r2.json()["id"] == body["id"]
+
+    # 结果查询
+    assert client.get(f"/api/v1/evaluations/{body['id']}").status_code == 200
+    assert client.get("/api/v1/idempotency/key-0014-tiny-plus").status_code == 200
+
+
+def test_tiny_unequal_uncertainty_perfect_negative_not_zeroed(client):
+    # ua=1e-9, ub=2e-9, r=-1 -> uc = 1e-9（不得归零）
+    m = _tiny_model("sum-tiny-rm1", 1e-9, 2e-9, -1.0)
+    assert client.post("/api/v1/models", json=m).status_code == 201
+    p = _tiny_payload("sum-tiny-rm1", 1e-9, 2e-9, -1.0, "key-0015-tiny-minus")
+    r = client.post("/api/v1/evaluations", json=p)
+    assert r.status_code == 201, r.text
+    gum = r.json()["result"]["combined"]["gum"]
+    assert abs(gum["standard_uncertainty"] - 1e-9) < 1e-12
+    assert gum["coverage_interval"]["low"] < 8.0 < gum["coverage_interval"]["high"]
+    contrib = {c["source"]: c for c in r.json()["result"]["contributions"]["gum"]}
+    assert contrib  # 逐项方差贡献仍然给出
+    assert abs(contrib["a~b"]["variance_contribution"] - -4e-18) < 1e-24
+
+
+def test_tiny_equal_uncertainty_perfect_negative_cancels(client):
+    # ua=ub=1e-9, r=-1 -> 真正的完全抵消，uc = 0、覆盖区间退化为点
+    m = _tiny_model("sum-tiny-cancel", 1e-9, 1e-9, -1.0)
+    assert client.post("/api/v1/models", json=m).status_code == 201
+    p = _tiny_payload("sum-tiny-cancel", 1e-9, 1e-9, -1.0, "key-0016-tiny-cancel")
+    r = client.post("/api/v1/evaluations", json=p)
+    assert r.status_code == 201, r.text
+    gum = r.json()["result"]["combined"]["gum"]
+    assert gum["standard_uncertainty"] == 0.0
+    assert gum["coverage_interval"]["low"] == gum["coverage_interval"]["high"] == 8.0
+    mc = r.json()["result"]["combined"]["monte_carlo"]
+    assert mc["standard_uncertainty"] == 0.0
+    assert mc["samples_range"] == {"min": 8.0, "max": 8.0}
+
+
+def test_tiny_invalid_correlation_still_rejected_and_not_saved(client):
+    # 小量级不改变非法相关矩阵的拒绝策略：422 且不保存
+    bad = _tiny_model("sum-tiny-bad", 1e-9, 2e-9, 0.5)
+    bad["inputs"].append({
+        "name": "c", "value": 1.0, "unit": "dimensionless",
+        "standard_uncertainty": 1e-9, "distribution": "normal",
+    })
+    bad["expression"] = "a + b + c"
+    bad["correlations"] = [
+        {"i": "a", "j": "b", "r": 1.0},
+        {"i": "b", "j": "c", "r": 1.0},
+        {"i": "a", "j": "c", "r": -1.0},
+    ]
+    r = client.post("/api/v1/models", json=bad)
+    assert r.status_code == 422
+    assert client.get("/api/v1/models/sum-tiny-bad").status_code == 404

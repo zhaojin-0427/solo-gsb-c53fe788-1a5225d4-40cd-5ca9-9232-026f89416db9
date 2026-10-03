@@ -6,7 +6,9 @@ import ast
 import copy
 import hashlib
 import json
+import math
 import uuid
+from decimal import Decimal, localcontext
 from typing import Any
 
 import numpy as np
@@ -407,5 +409,16 @@ def s_unit(name: str, record: dict[str, Any]) -> str:
 
 
 def _f(x: Any) -> float:
-    """统一转 float（剔除 numpy 标量，保证 JSON 可序列化）。"""
-    return round(float(x), 15)
+    """统一转 float（剔除 numpy 标量，保证 JSON 可序列化）。
+
+    常规尺度沿用历史实现的 **15 位小数** 舍入（固定种子流的既有响应
+    逐位不变）；但固定小数位会把小量级模型的真实结果（如方差贡献
+    1e-18）直接舍成 0.0，因此对 |x| < 1e-15 的小值改用 **15 位有效
+    数字** 舍入——与数值尺度无关，保留真实小正方差的响应精度。
+    """
+    v = float(x)
+    if v == 0.0 or not math.isfinite(v) or abs(v) >= 1e-15:
+        return round(v, 15)
+    with localcontext() as ctx:
+        ctx.prec = 15
+        return float(+Decimal(v))

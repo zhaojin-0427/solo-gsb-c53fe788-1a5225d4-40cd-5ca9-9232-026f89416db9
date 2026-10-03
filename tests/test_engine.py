@@ -246,6 +246,59 @@ def test_monte_carlo_perfect_correlation_directions():
             np.testing.assert_array_equal(z[0], -z[1])
 
 
+def test_gum_tiny_magnitude_variance_not_clamped_to_zero():
+    # 回归：旧实现用固定绝对阈值（eps*max(1.0, 对角项)）钳方差，
+    # 把 u=1e-9 时真实的 ~1e-18 量级正方差误判为舍入噪声而归零。
+    # 阈值必须与协方差项尺度同步收缩，保留真实小正方差。
+    from app.engine import build_correlation_matrix, run_gum
+    expr, ctx = _linear_sum_ctx()
+    x = ctx.nominal_to_base({"a": 3.0, "b": 5.0})
+
+    # r=+1, ua=ub=1e-9 -> uc = 2e-9（不得归零）
+    std = np.array([1e-9, 1e-9])
+    corr = build_correlation_matrix(("a", "b"), [("a", "b", 1.0)], set())
+    g = run_gum(expr, ("a", "b"), x, std, corr, ctx)
+    assert abs(g.uc - 2e-9) < 1e-15
+    assert g.coverage_low < 8.0 < g.coverage_high
+    by_source = {c["input"]: c for c in g.contributions}
+    assert by_source["a"]["variance_contribution"] > 0.0
+    assert by_source["b"]["variance_contribution"] > 0.0
+    assert by_source["a~b"]["variance_contribution"] > 0.0
+    assert abs(by_source["a"]["fraction"] - 0.25) < 1e-9
+    assert abs(by_source["a~b"]["fraction"] - 0.5) < 1e-9
+
+    # r=-1, ua=1e-9, ub=2e-9 -> uc = 1e-9（不得归零）
+    std = np.array([1e-9, 2e-9])
+    corr = build_correlation_matrix(("a", "b"), [("a", "b", -1.0)], set())
+    g = run_gum(expr, ("a", "b"), x, std, corr, ctx)
+    assert abs(g.uc - 1e-9) < 1e-12
+    assert g.coverage_low < 8.0 < g.coverage_high
+    assert g.contributions  # 逐项贡献仍然给出
+
+    # r=-1, ua=ub=1e-9 -> 完全抵消，uc = 0（尺度收缩后阈值仍能识别真实抵消）
+    std = np.array([1e-9, 1e-9])
+    corr = build_correlation_matrix(("a", "b"), [("a", "b", -1.0)], set())
+    g = run_gum(expr, ("a", "b"), x, std, corr, ctx)
+    assert g.uc == 0.0
+    assert g.coverage_low == g.coverage_high == 8.0
+
+
+def test_monte_carlo_tiny_magnitude_converges_with_nonzero_sd():
+    # 小量级蒙特卡洛：相对标准误与尺度无关，必须正常收敛且标准差不为零
+    from app.engine import build_correlation_matrix, run_monte_carlo
+    expr, ctx = _linear_sum_ctx()
+    x = {"a": 3.0, "b": 5.0}
+    std = np.array([1e-9, 1e-9])
+    corr = build_correlation_matrix(("a", "b"), [("a", "b", 1.0)], set())
+    mc = run_monte_carlo(
+        expr, ("a", "b"), ("normal", "normal"), x, std, corr,
+        n_draws=20_000, seed=20261003, ctx=ctx, convergence_tol=0.05,
+    )
+    assert mc.converged, mc.nonconvergence_reasons
+    assert abs(mc.std - 2e-9) < 5e-11
+    assert mc.coverage_low < 8.0 < mc.coverage_high
+
+
 def test_three_way_perfect_correlation_singular_block():
     # 三个完全相关变量（r 全为 1）：秩 1 的奇异矩阵，也必须能登记与抽样
     from app.expressions import compile_expression

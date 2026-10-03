@@ -315,12 +315,20 @@ def run_gum(
     grad_base = numerical_gradient(compiled, x_base, names)
     cov = (std_base[:, None] * corr * std_base[None, :])
     var_y = float(grad_base @ cov @ grad_base)
-    # 机器精度尺度：各不确定度项单独贡献之和（与相关结构无关，非负）
-    diag_scale = float(grad_base @ np.diag(np.diag(cov)) @ grad_base)
-    var_floor = _EPS * max(1.0, abs(diag_scale))
+    # 舍入误差尺度必须与实际参与求和的协方差项同阶：
+    #   各项 g_i g_j Cov(i,j) 的绝对值之和（对角项 + 两倍成对项），
+    #   再按项数放宽，以同时覆盖矩阵乘法舍入与中心差分梯度（相对误差
+    #   ~eps^(1/3)）在“理论完全抵消”时留下的残差。
+    # 绝不能使用与输入尺度无关的固定绝对阈值（旧实现含 max(1.0, ...)），
+    # 否则小量级模型（如 u = 1e-9，真实方差 4e-18）会被误判为舍入噪声
+    # 而钳为零，导致标准不确定度、覆盖区间与逐项贡献全部错误归零。
+    term_scale = float(
+        np.abs(grad_base[:, None] * grad_base[None, :] * cov).sum()
+    )
+    var_floor = _EPS * max(1.0, float(cov.shape[0])) * term_scale
     # 完全相关抵消（r = -1、梯度与标准差逐项匹配）时，理论方差恰为 0；
-    # 矩阵乘法次序会残留 ±1e-12 量级的浮点噪声（可正可负），统一钳为 0。
-    # 仅钳机器精度级别残差，真实小方差（uc 远大于 0）不受影响。
+    # 浮点运算会残留正/负噪声，统一钳为 0。阈值随协方差项尺度收缩，
+    # 真实小正方差（uc 远大于 0）不受影响。
     if -var_floor <= var_y <= var_floor:
         var_y = 0.0
     if var_y < 0:
